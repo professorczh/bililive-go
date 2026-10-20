@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,11 +77,13 @@ func testConnection(t *testing.T, roomID, cookies string) {
 	header := http.Header{}
 	header.Set("User-Agent", userAgent)
 	header.Set("Origin", "https://live.douyin.com")
-	if cookies != "" {
-		header.Set("Cookie", cookies)
-	} else {
-		header.Set("Cookie", "ttwid="+ttwid)
+	cookieVal := "ttwid=" + ttwid
+	if cookies != "" && !strings.Contains(cookies, "ttwid=") {
+		cookieVal = cookies + "; ttwid=" + ttwid
+	} else if cookies != "" {
+		cookieVal = cookies
 	}
+	header.Set("Cookie", cookieVal)
 
 	dialer := &websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, resp, dialErr := dialer.Dial(wsURL, header)

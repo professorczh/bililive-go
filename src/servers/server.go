@@ -100,8 +100,10 @@ func initMux(ctx context.Context) *mux.Router {
 	apiRoute.HandleFunc("/file/{path:.*}", deleteFile).Methods("DELETE")
 	apiRoute.HandleFunc("/batch/file/rename", batchRenameFiles).Methods("PUT")
 	apiRoute.HandleFunc("/batch/file/delete", batchDeleteFiles).Methods("POST")
+	apiRoute.HandleFunc("/batch/file/analyze", analyzeFile).Methods("POST")
 	apiRoute.HandleFunc("/cookies", getLiveHostCookie).Methods("GET")
 	apiRoute.HandleFunc("/cookies", putLiveHostCookie).Methods("PUT")
+	apiRoute.HandleFunc("/cookies/verify", verifyPlatformCookie).Methods("POST")
 
 	// Bilibili Login
 	apiRoute.HandleFunc("/bilibili/qrcode", getBilibiliQRCode).Methods("GET")

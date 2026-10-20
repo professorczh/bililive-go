@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -2676,11 +2677,13 @@ func getFileInfo(writer http.ResponseWriter, r *http.Request) {
 		LastModified int64  `json:"last_modified"`
 		Size         int64  `json:"size"`
 		SubtitleFile string `json:"subtitle_file,omitempty"`
+		ReportFile   string `json:"report_file,omitempty"`
 		Uploaded     bool   `json:"uploaded,omitempty"`
 	}
 
-	// First pass: separate ASS files and build base-name -> ASS file map
-	assFiles := make(map[string]string) // baseName (no ext) -> ass filename
+	// First pass: separate ASS and report files and build base-name -> filename maps
+	assFiles := make(map[string]string)    // baseName (no ext) -> ass filename
+	reportFiles := make(map[string]string) // baseName (no ext) -> report filename
 	type fileEntry struct {
 		dir  os.DirEntry
 		info os.FileInfo
@@ -2696,12 +2699,16 @@ func getFileInfo(writer http.ResponseWriter, r *http.Request) {
 			// Register ASS file by base name (without extension)
 			baseName := name[:len(name)-4]
 			assFiles[baseName] = name
+		} else if !file.IsDir() && strings.HasSuffix(strings.ToLower(name), "_report.html") {
+			baseName := name[:len(name)-len("_report.html")]
+			reportFiles[baseName] = name
+			validFiles = append(validFiles, fileEntry{dir: file, info: info})
 		} else {
 			validFiles = append(validFiles, fileEntry{dir: file, info: info})
 		}
 	}
 
-	// Second pass: build response, attaching subtitle info to video files
+	// Second pass: build response, attaching subtitle and report info to video files
 	jsonFiles := make([]jsonFile, 0, len(validFiles))
 	for _, fe := range validFiles {
 		jf := jsonFile{
@@ -2711,13 +2718,16 @@ func getFileInfo(writer http.ResponseWriter, r *http.Request) {
 		}
 		if !fe.dir.IsDir() {
 			jf.Size = fe.info.Size()
-			// Check if this file has an associated ASS subtitle
+			// Check if this file has an associated ASS subtitle or report
 			baseName := fe.dir.Name()
 			if idx := strings.LastIndex(baseName, "."); idx > 0 {
 				baseName = baseName[:idx]
 			}
 			if assName, ok := assFiles[baseName]; ok {
 				jf.SubtitleFile = assName
+			}
+			if repName, ok := reportFiles[baseName]; ok {
+				jf.ReportFile = repName
 			}
 			// Check if this file has been uploaded to cloud
 			relPath := fe.dir.Name()
@@ -3100,6 +3110,39 @@ func batchDeleteFiles(writer http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(writer, commonResp{Data: results})
+}
+
+func analyzeFile(writer http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+		Clip bool   `json:"clip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(writer, commonResp{ErrNo: 400, ErrMsg: "无效请求"})
+		return
+	}
+	cfg := configs.GetCurrentConfig()
+	absPath, err := getSafePath(cfg.OutPutPath, body.Path)
+	if err != nil {
+		writeJSON(writer, commonResp{ErrNo: 400, ErrMsg: "无效或越权路径"})
+		return
+	}
+
+	go func() {
+		args := []string{"tools/analyzer/analyze.py", "--video", absPath}
+		if body.Clip {
+			args = append(args, "--clip")
+		}
+		cmd := exec.Command("python3", args...)
+		cmd.Dir = "."
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			applog.GetLogger().WithError(err).Warnf("异步执行 analyze.py 失败: %s", absPath)
+		}
+	}()
+
+	writeJSON(writer, commonResp{ErrNo: 0, ErrMsg: "AI 智能切片与分析任务已在后台启动"})
 }
 
 func getLiveHostCookie(writer http.ResponseWriter, r *http.Request) {
@@ -3980,6 +4023,200 @@ func verifyBilibiliCookie(writer http.ResponseWriter, r *http.Request) {
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Write(body)
+}
+
+type verifyCookieReq struct {
+	Host   string `json:"host"`
+	Cookie string `json:"cookie"`
+}
+
+type verifyCookieResp struct {
+	Valid    bool   `json:"valid"`
+	Platform string `json:"platform"`
+	Username string `json:"username,omitempty"`
+	UID      string `json:"uid,omitempty"`
+	Message  string `json:"message"`
+}
+
+// verifyPlatformCookie 通用平台 Cookie 在线校验
+func verifyPlatformCookie(writer http.ResponseWriter, r *http.Request) {
+	var req verifyCookieReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJsonWithStatusCode(writer, http.StatusBadRequest, commonResp{ErrNo: http.StatusBadRequest, ErrMsg: "无效的请求体"})
+		return
+	}
+
+	cookie := strings.TrimSpace(req.Cookie)
+	if cookie == "" {
+		writeJSON(writer, verifyCookieResp{
+			Valid:   false,
+			Message: "Cookie 为空，请先配置或粘贴 Cookie",
+		})
+		return
+	}
+
+	host := strings.ToLower(req.Host)
+
+	switch {
+	case strings.Contains(host, "bilibili"):
+		resp, err := requests.Get("https://api.bilibili.com/x/web-interface/nav",
+			requests.Header("Cookie", cookie),
+			live.CommonUserAgent,
+		)
+		if err != nil {
+			writeJSON(writer, verifyCookieResp{Valid: false, Platform: "哔哩哔哩", Message: "连通 B 站接口失败: " + err.Error()})
+			return
+		}
+		body, _ := resp.Text()
+		res := gjson.Parse(body)
+		if res.Get("code").Int() == 0 && res.Get("data.isLogin").Bool() {
+			uname := res.Get("data.uname").String()
+			mid := res.Get("data.mid").String()
+			writeJSON(writer, verifyCookieResp{
+				Valid:    true,
+				Platform: "哔哩哔哩",
+				Username: uname,
+				UID:      mid,
+				Message:  fmt.Sprintf("哔哩哔哩 Cookie 验证通过！当前用户: %s (UID: %s)", uname, mid),
+			})
+			return
+		}
+		writeJSON(writer, verifyCookieResp{
+			Valid:    false,
+			Platform: "哔哩哔哩",
+			Message:  "哔哩哔哩 Cookie 已失效或未登录",
+		})
+		return
+
+	case strings.Contains(host, "kuaishou"):
+		if !strings.Contains(cookie, "kuaishou.live.web_st") {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    false,
+				Platform: "快手",
+				Message:  "快手 Cookie 格式不完整：缺少关键登录令牌 kuaishou.live.web_st",
+			})
+			return
+		}
+
+		resp, err := requests.Get("https://live.kuaishou.com/",
+			requests.Header("Cookie", cookie),
+			live.CommonUserAgent,
+		)
+		if err != nil {
+			writeJSON(writer, verifyCookieResp{Valid: false, Platform: "快手", Message: "请求快手服务器失败: " + err.Error()})
+			return
+		}
+		body, _ := resp.Text()
+		reg := regexp.MustCompile(`window\.__INITIAL_STATE__\s*=\s*(.*?);\s*\(function`)
+		matches := reg.FindStringSubmatch(body)
+		if len(matches) < 2 {
+			reg2 := regexp.MustCompile(`window\.__INITIAL_STATE__\s*=\s*(\{.*?\});`)
+			matches = reg2.FindStringSubmatch(body)
+		}
+		if len(matches) >= 2 {
+			raw := strings.ReplaceAll(matches[1], ": undefined", ": null")
+			res := gjson.Parse(raw)
+			owner := res.Get("user.userInfoQuery.ownerInfo")
+			name := owner.Get("name").String()
+			originUID := owner.Get("originUserId").Raw
+			if name != "" || (originUID != "" && originUID != "0" && originUID != "null") {
+				writeJSON(writer, verifyCookieResp{
+					Valid:    true,
+					Platform: "快手",
+					Username: name,
+					UID:      originUID,
+					Message:  fmt.Sprintf("快手 Cookie 验证通过！当前用户: %s (UID: %s)", name, originUID),
+				})
+				return
+			}
+		}
+		writeJSON(writer, verifyCookieResp{
+			Valid:    false,
+			Platform: "快手",
+			Message:  "快手 Cookie 验证失败：未检测到有效登录身份，可能已在其他设备退出或已过期",
+		})
+		return
+
+	case strings.Contains(host, "douyin"):
+		if !strings.Contains(cookie, "sessionid") {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    false,
+				Platform: "抖音",
+				Message:  "抖音 Cookie 格式不完整：缺少核心会话凭据 sessionid",
+			})
+			return
+		}
+
+		resp, err := requests.Get("https://www.douyin.com/aweme/v1/web/notice/count/",
+			requests.Header("Cookie", cookie),
+			requests.Header("Referer", "https://www.douyin.com/"),
+			live.CommonUserAgent,
+		)
+		if err != nil {
+			writeJSON(writer, verifyCookieResp{Valid: false, Platform: "抖音", Message: "请求抖音服务器失败: " + err.Error()})
+			return
+		}
+		body, _ := resp.Text()
+		res := gjson.Parse(body)
+		statusCode := res.Get("status_code").Int()
+		if statusCode == 0 {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    true,
+				Platform: "抖音",
+				Message:  "抖音 Cookie 验证通过！登录会话处于正常活跃状态",
+			})
+			return
+		}
+		statusMsg := res.Get("status_msg").String()
+		if statusMsg == "" {
+			statusMsg = "会话已过期或未登录"
+		}
+		writeJSON(writer, verifyCookieResp{
+			Valid:    false,
+			Platform: "抖音",
+			Message:  fmt.Sprintf("抖音 Cookie 已失效: %s (状态码: %d)", statusMsg, statusCode),
+		})
+		return
+
+	case strings.Contains(host, "douyu"):
+		if strings.Contains(cookie, "acf_auth") || strings.Contains(cookie, "acf_uid") {
+			regUid := regexp.MustCompile(`acf_uid=([^;]+)`)
+			uidMatch := regUid.FindStringSubmatch(cookie)
+			uid := ""
+			if len(uidMatch) >= 2 {
+				uid = uidMatch[1]
+			}
+			writeJSON(writer, verifyCookieResp{
+				Valid:    true,
+				Platform: "斗鱼",
+				UID:      uid,
+				Message:  fmt.Sprintf("斗鱼 Cookie 格式有效 (UID: %s)", uid),
+			})
+			return
+		}
+		writeJSON(writer, verifyCookieResp{
+			Valid:    false,
+			Platform: "斗鱼",
+			Message:  "斗鱼 Cookie 缺少 acf_auth / acf_uid 凭据，建议使用右侧重新扫码",
+		})
+		return
+
+	default:
+		if strings.Contains(cookie, "=") {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    true,
+				Platform: host,
+				Message:  "Cookie 格式符合键值对规范",
+			})
+		} else {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    false,
+				Platform: host,
+				Message:  "Cookie 格式不正确，缺少 name=value 键值对",
+			})
+		}
+		return
+	}
 }
 
 // getDouyuQRCode 获取斗鱼扫码登录二维码（后端代理 passport.douyu.com，

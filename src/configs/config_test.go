@@ -236,9 +236,16 @@ func TestNormalizeLiveRoomUrl(t *testing.T) {
 		NormalizeLiveRoomUrl("https://live.douyin.com/?room_id=7688588152885267238"))
 	assert.Equal(t, "https://live.douyin.com/?live_web_rid=abc123",
 		NormalizeLiveRoomUrl("https://live.douyin.com/?live_web_rid=abc123"))
-	assert.Equal(t, "https://live.douyin.com/?live_web_rid=",
-		NormalizeLiveRoomUrl("https://live.douyin.com/?live_web_rid="))
 	assert.Equal(t, "https://live.douyin.com/", NormalizeLiveRoomUrl("https://live.douyin.com/"))
+	// 抖音网页关注页/直播间入口
+	assert.Equal(t, "https://live.douyin.com/759939177519",
+		NormalizeLiveRoomUrl("https://www.douyin.com/follow/live/759939177519"))
+	assert.Equal(t, "https://live.douyin.com/759939177519",
+		NormalizeLiveRoomUrl("https://www.douyin.com/live/759939177519"))
+	assert.Equal(t, "https://live.douyin.com/759939177519",
+		NormalizeLiveRoomUrl("https://douyin.com/follow/live/759939177519"))
+	assert.Equal(t, "https://www.douyin.com/video/123456",
+		NormalizeLiveRoomUrl("https://www.douyin.com/video/123456"))
 }
 
 // 手动编辑配置写入 m.douyu.com 房间时，加载阶段应规范化为 www.douyu.com

@@ -665,3 +665,70 @@ func (x *Gift) Unmarshal(data []byte) error {
 	}
 	return nil
 }
+
+// LikeMessage — 点赞消息
+type LikeMessage struct {
+	Common *Common `json:"common"`
+	Count  int64   `json:"count"`
+	Total  int64   `json:"total"`
+	Color  int64   `json:"color"`
+	User   *User   `json:"user"`
+	Icon   string  `json:"icon"`
+}
+
+func (x *LikeMessage) Unmarshal(data []byte) error {
+	*x = LikeMessage{}
+	for len(data) > 0 {
+		num, typ, n := protowire.ConsumeTag(data)
+		if n < 0 {
+			return protowire.ParseError(n)
+		}
+		data = data[n:]
+		switch typ {
+		case protowire.VarintType:
+			v, n := protowire.ConsumeVarint(data)
+			if n < 0 {
+				return protowire.ParseError(n)
+			}
+			data = data[n:]
+			switch num {
+			case 2:
+				x.Count = int64(v)
+			case 3:
+				x.Total = int64(v)
+			case 4:
+				x.Color = int64(v)
+			}
+		case protowire.BytesType:
+			v, n := protowire.ConsumeBytes(data)
+			if n < 0 {
+				return protowire.ParseError(n)
+			}
+			data = data[n:]
+			switch num {
+			case 1:
+				msg := &Common{}
+				if err := msg.Unmarshal(v); err != nil {
+					return err
+				}
+				x.Common = msg
+			case 5:
+				msg := &User{}
+				if err := msg.Unmarshal(v); err != nil {
+					return err
+				}
+				x.User = msg
+			case 6:
+				x.Icon = string(v)
+			}
+		default:
+			n := protowire.ConsumeFieldValue(num, typ, data)
+			if n < 0 {
+				return protowire.ParseError(n)
+			}
+			data = data[n:]
+		}
+	}
+	return nil
+}
+

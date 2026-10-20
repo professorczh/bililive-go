@@ -13,7 +13,11 @@ import {
     // @ts-ignore
     DeleteOutlined,
     // @ts-ignore
-    CloudUploadOutlined
+    CloudUploadOutlined,
+    // @ts-ignore
+    FileSearchOutlined,
+    // @ts-ignore
+    ThunderboltOutlined
 } from "@ant-design/icons";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Utils from "../../utils/common";
@@ -503,6 +507,7 @@ type CurrentFolderFile = {
     last_modified: number;
     size: number;
     subtitle_file?: string;
+    report_file?: string;
     uploaded?: boolean;
 }
 
@@ -1026,6 +1031,56 @@ const FileList: React.FC = () => {
         };
     };
 
+    const handleOpenReport = (record: CurrentFolderFile) => {
+        if (!record.report_file) return;
+        const dirPath = pathParam ? pathParam + "/" : "";
+        const reportUrl = `files/${encodePath(dirPath + record.report_file)}`;
+        window.open(reportUrl, "_blank");
+    };
+
+    const handleAnalyze = (record: CurrentFolderFile) => {
+        let fullPath = record.name;
+        if (pathParam) {
+            fullPath = pathParam + "/" + record.name;
+        }
+        message.loading({ content: `正在提交 AI 智能分析任务: ${record.name}...`, key: "ai_analyze" });
+        api.analyzeFile(fullPath, true)
+            .then((rsp: any) => {
+                if (rsp.err_no === 0 || !rsp.err_no) {
+                    message.success({ content: `AI 智能切片与分析任务已在后台启动，完成后将生成报告与高光切片！`, key: "ai_analyze", duration: 5 });
+                } else {
+                    message.error({ content: rsp.err_msg || "启动 AI 分析失败", key: "ai_analyze" });
+                }
+            })
+            .catch((err: any) => {
+                message.error({ content: "启动 AI 分析失败: " + (err.message || err), key: "ai_analyze" });
+            });
+    };
+
+    const handleBatchAnalyze = () => {
+        if (selectedRowKeys.length === 0) return;
+        const videoFiles = currentFolderFiles.filter(
+            f => selectedRowKeys.includes(f.name) && !f.is_folder && isVideoFileName(f.name)
+        );
+        if (videoFiles.length === 0) {
+            message.warning("选中的项目中没有视频文件");
+            return;
+        }
+        message.loading({ content: `正在提交 ${videoFiles.length} 个视频的 AI 分析任务...`, key: "batch_analyze" });
+        Promise.all(
+            videoFiles.map(f => {
+                const fullPath = pathParam ? `${pathParam}/${f.name}` : f.name;
+                return api.analyzeFile(fullPath, true);
+            })
+        )
+            .then(() => {
+                message.success({ content: `已在后台启动 ${videoFiles.length} 个视频的 AI 智能切片与分析任务！`, key: "batch_analyze", duration: 5 });
+            })
+            .catch(err => {
+                message.error({ content: "批量提交失败: " + (err.message || err), key: "batch_analyze" });
+            });
+    };
+
     const onRowClick = (record: CurrentFolderFile) => {
         // 保持使用原始字符串进行拼接
         let fullPath = record.name;
@@ -1243,6 +1298,19 @@ const FileList: React.FC = () => {
                                 无字幕
                             </span>
                         )}
+                        {record.report_file && (
+                            <Tooltip title={`查看 AI 总结报告: ${record.report_file}`}>
+                                <span
+                                    style={{ marginLeft: 6, fontSize: 11, color: '#722ed1', background: '#f9f0ff', padding: '1px 6px', borderRadius: 4, cursor: 'pointer', border: '1px solid #d3adf7' }}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenReport(record);
+                                    }}
+                                >
+                                    📊 AI报告
+                                </span>
+                            </Tooltip>
+                        )}
                         {record.uploaded && (
                             <span style={{ marginLeft: 6, fontSize: 11, color: '#52c41a', background: '#f6ffed', padding: '1px 6px', borderRadius: 4, cursor: 'default' }}>
                                 已上传
@@ -1276,9 +1344,35 @@ const FileList: React.FC = () => {
         }, {
             title: "操作",
             key: "action",
-            width: 200,
+            width: 280,
             render: (text: any, record: CurrentFolderFile) => (
                 <Space size="small" onClick={(e) => e.stopPropagation()}>
+                    {record.report_file && (
+                        <Button
+                            type="link"
+                            size="small"
+                            // @ts-ignore
+                            icon={<FileSearchOutlined />}
+                            onClick={() => handleOpenReport(record)}
+                            className="action-btn"
+                            style={{ color: '#722ed1' }}
+                        >
+                            报告
+                        </Button>
+                    )}
+                    {!record.is_folder && isVideoFileName(record.name) && (
+                        <Button
+                            type="link"
+                            size="small"
+                            // @ts-ignore
+                            icon={<ThunderboltOutlined />}
+                            onClick={() => handleAnalyze(record)}
+                            className="action-btn"
+                            style={{ color: '#fa8c16' }}
+                        >
+                            {record.report_file ? "重分析" : "AI分析"}
+                        </Button>
+                    )}
                     <Button
                         type="link"
                         size="small"
@@ -1506,6 +1600,23 @@ const FileList: React.FC = () => {
                                         批量烧录{withAss > 0 ? ` (${withAss})` : ''}
                                     </Button>
                                 </Tooltip>
+                            );
+                        })()}
+                        {(() => {
+                            const videoCount = currentFolderFiles.filter(
+                                f => selectedRowKeys.includes(f.name) && !f.is_folder && isVideoFileName(f.name)
+                            ).length;
+                            if (videoCount === 0) return null;
+                            return (
+                                <Button
+                                    size="small"
+                                    type="default"
+                                    // @ts-ignore
+                                    icon={<ThunderboltOutlined />}
+                                    onClick={handleBatchAnalyze}
+                                >
+                                    批量AI分析 ({videoCount})
+                                </Button>
                             );
                         })()}
                         <Button

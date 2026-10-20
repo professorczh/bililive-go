@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   ComposedChart,

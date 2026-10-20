@@ -58,12 +58,20 @@ type DouyinClient struct {
 	conn      *websocket.Conn
 	onDanmaku func(username, content string)
 	onGift    func(username, giftName string, num int)
+	onLike    func(username string, count int64, total int64)
 	done      chan struct{}
 	closeOnce sync.Once
 	logger    *logrus.Entry
 	mu        sync.Mutex
 	running   bool
 	seqId     uint64
+}
+
+// SetOnLike 设置点赞消息回调
+func (c *DouyinClient) SetOnLike(fn func(username string, count int64, total int64)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onLike = fn
 }
 
 // NewDouyinClient 创建新的抖音弹幕客户端
@@ -360,6 +368,24 @@ func (c *DouyinClient) handleMessage(msg *Message) {
 		c.handleChatMessage(msg.Payload)
 	case "WebcastGiftMessage":
 		c.handleGiftMessage(msg.Payload)
+	case "WebcastLikeMessage", "WebcastDiggMessage":
+		c.handleLikeMessage(msg.Payload)
+	}
+}
+
+func (c *DouyinClient) handleLikeMessage(payload []byte) {
+	likeMsg := &LikeMessage{}
+	if err := likeMsg.Unmarshal(payload); err != nil {
+		c.logger.WithError(err).Debug("解析 LikeMessage 失败")
+		return
+	}
+
+	if c.onLike != nil {
+		username := ""
+		if likeMsg.User != nil {
+			username = likeMsg.User.Nickname
+		}
+		c.onLike(username, likeMsg.Count, likeMsg.Total)
 	}
 }
 

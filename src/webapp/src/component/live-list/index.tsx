@@ -1,6 +1,6 @@
 import React from "react";
-import { Alert, Button, Divider, Table, Tag, Tabs, Row, Col, Tooltip, message, List, Typography, Switch, Space, Popconfirm, Select, Spin } from 'antd';
-import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined, CommentOutlined } from '@ant-design/icons';
+import { Alert, Button, Divider, Table, Tag, Tabs, Row, Col, Tooltip, message, List, Typography, Switch, Space, Popconfirm, Select, Spin, notification } from 'antd';
+import { EditOutlined, SyncOutlined, CloudSyncOutlined, ReloadOutlined, SwapOutlined, CheckCircleOutlined, ExclamationCircleOutlined, CommentOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import PopDialog from '../pop-dialog/index';
 import BatchAddRoomDialog from '../batch-add-room-dialog/index';
 import LogPanel from '../log-panel/index';
@@ -318,6 +318,7 @@ interface IState {
     danmakuMessages: { [key: string]: DanmakuMessage[] }, // roomId -> 弹幕消息列表
     expandedActiveTabs: { [key: string]: string }, // roomId -> 当前激活的 tab key
     douyuNeedRescan: boolean, // 斗鱼 cookie 自动续期已失败，需重新扫码
+    testingCookieHost: string | null, // 当前正在验证 Cookie 的平台 host
 }
 
 interface ItemData {
@@ -591,17 +592,33 @@ class LiveList extends React.Component<Props, IState> {
             key: 'Cookie',
             ellipsis: true,
             render: (name: String, data: CookieItemData) => {
-                return <Row gutter={16}>
-                    <Col className="gutter-row" span={12}>
-                        <Tooltip title={data.Cookie}>
-                            <div className="gutter-box cookieString" title={data.Cookie}>{data.Cookie}</div>
+                const isTesting = this.state.testingCookieHost === data.Host;
+                return <Row gutter={16} align="middle">
+                    <Col className="gutter-row" span={18}>
+                        <Tooltip title={data.Cookie || '未配置 Cookie'}>
+                            <div className="gutter-box cookieString" title={data.Cookie || ''}>
+                                {data.Cookie || <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>未配置 Cookie</span>}
+                            </div>
                         </Tooltip>
                     </Col>
-                    <Col className="gutter-row" span={4}>
-                        <div className="gutter-box">
-                            <Button type="primary" shape="circle" icon={<EditOutlined />} onClick={() => {
-                                this.onEditCookitClick(data)
-                            }} />
+                    <Col className="gutter-row" span={6}>
+                        <div className="gutter-box" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Tooltip title="编辑 Cookie">
+                                <Button type="primary" shape="circle" icon={<EditOutlined />} onClick={() => {
+                                    this.onEditCookitClick(data)
+                                }} />
+                            </Tooltip>
+                            <Tooltip title="测试当前 Cookie 是否有效">
+                                <Button
+                                    shape="circle"
+                                    icon={<SafetyCertificateOutlined />}
+                                    loading={isTesting}
+                                    style={{ color: '#52c41a', borderColor: '#b7eb8f' }}
+                                    onClick={() => {
+                                        this.handleTestCookie(data);
+                                    }}
+                                />
+                            </Tooltip>
                         </div>
                     </Col>
                 </Row>
@@ -640,6 +657,7 @@ class LiveList extends React.Component<Props, IState> {
             danmakuMessages: {},
             expandedActiveTabs: {},
             douyuNeedRescan: false,
+            testingCookieHost: null,
         }
     }
 
@@ -938,6 +956,54 @@ class LiveList extends React.Component<Props, IState> {
 
     onEditCookitClick = (data: any) => {
         this.cookieChild.showModal(data)
+    }
+
+    handleTestCookie = async (data: CookieItemData) => {
+        if (!data.Cookie || !data.Cookie.trim()) {
+            notification.warning({
+                message: 'Cookie 为空',
+                description: `【${data.Platform_cn_name || data.Host}】尚未配置 Cookie，请先点击编辑按钮填入 Cookie。`,
+            });
+            return;
+        }
+
+        this.setState({ testingCookieHost: data.Host });
+        try {
+            const res: any = await api.verifyCookie({
+                Host: data.Host,
+                Cookie: data.Cookie,
+            });
+
+            if (res && res.valid) {
+                let desc = res.message || 'Cookie 验证通过！会话处于有效状态';
+                if (res.username) {
+                    desc = `账号：${res.username}${res.uid ? ` (UID: ${res.uid})` : ''}\n${desc}`;
+                }
+                notification.success({
+                    message: `【${res.platform || data.Platform_cn_name}】Cookie 有效`,
+                    description: (
+                        <div style={{ whiteSpace: 'pre-line' }}>
+                            {desc}
+                        </div>
+                    ),
+                    duration: 5,
+                });
+            } else {
+                notification.error({
+                    message: `【${(res && res.platform) || data.Platform_cn_name}】Cookie 校验失败`,
+                    description: (res && res.message) || 'Cookie 已失效或未登录，请重新获取并更新',
+                    duration: 6,
+                });
+            }
+        } catch (err: any) {
+            notification.error({
+                message: `【${data.Platform_cn_name}】测试请求失败`,
+                description: String(err?.message || err),
+                duration: 6,
+            });
+        } finally {
+            this.setState({ testingCookieHost: null });
+        }
     }
 
     /**

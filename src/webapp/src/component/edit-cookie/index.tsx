@@ -1,4 +1,5 @@
-import { Modal, Input, notification, Divider } from 'antd';
+import { Modal, Input, notification, Divider, Button } from 'antd';
+import { SafetyCertificateOutlined } from '@ant-design/icons';
 import React from 'react';
 import API from '../../utils/api';
 import BiliLoginPanel from './bili-login-panel';
@@ -22,7 +23,8 @@ class EditCookieDialog extends React.Component<IProps> {
         soopAuthDraft: null as any,
         Host: '',
         Platform_cn_name: '',
-        modalKey: 0
+        modalKey: 0,
+        testing: false
     };
 
     api = new API();
@@ -37,7 +39,8 @@ class EditCookieDialog extends React.Component<IProps> {
             soopAuthDraft: null,
             Host: data.Host,
             Platform_cn_name: data.Platform_cn_name,
-            modalKey: Date.now()
+            modalKey: Date.now(),
+            testing: false
         });
     };
 
@@ -131,7 +134,56 @@ class EditCookieDialog extends React.Component<IProps> {
     };
 
     handleCancel = () => {
-        this.setState({ visible: false, textView: '' });
+        this.setState({ visible: false, textView: '', testing: false });
+    };
+
+    handleTestInputCookie = async () => {
+        const cookie = (this.state.textView || '').trim();
+        if (!cookie) {
+            notification.warning({
+                message: 'Cookie 为空',
+                description: '请先粘贴或输入 Cookie 字符串后再进行测试',
+            });
+            return;
+        }
+
+        this.setState({ testing: true });
+        try {
+            const res: any = await this.api.verifyCookie({
+                Host: this.state.Host,
+                Cookie: cookie,
+            });
+
+            if (res && res.valid) {
+                let desc = res.message || 'Cookie 验证通过！会话处于有效状态';
+                if (res.username) {
+                    desc = `账号：${res.username}${res.uid ? ` (UID: ${res.uid})` : ''}\n${desc}`;
+                }
+                notification.success({
+                    message: `【${res.platform || this.state.Platform_cn_name}】Cookie 有效`,
+                    description: (
+                        <div style={{ whiteSpace: 'pre-line' }}>
+                            {desc}
+                        </div>
+                    ),
+                    duration: 5,
+                });
+            } else {
+                notification.error({
+                    message: `【${(res && res.platform) || this.state.Platform_cn_name}】Cookie 校验失败`,
+                    description: (res && res.message) || 'Cookie 已失效或未登录，请重新获取并更新',
+                    duration: 6,
+                });
+            }
+        } catch (err: any) {
+            notification.error({
+                message: '测试请求失败',
+                description: String(err?.message || err),
+                duration: 6,
+            });
+        } finally {
+            this.setState({ testing: false });
+        }
     };
 
     render() {
@@ -185,6 +237,15 @@ class EditCookieDialog extends React.Component<IProps> {
                                 <span style={{ fontSize: '15px', fontWeight: 600, color: '#262626' }}>
                                     请输入有效的 Cookie 字符串：
                                 </span>
+                                <Button
+                                    size="small"
+                                    icon={<SafetyCertificateOutlined />}
+                                    loading={this.state.testing}
+                                    style={{ color: '#52c41a', borderColor: '#b7eb8f' }}
+                                    onClick={this.handleTestInputCookie}
+                                >
+                                    测试当前输入
+                                </Button>
                             </div>
                             <TextArea
                                 className="cookie-textarea"

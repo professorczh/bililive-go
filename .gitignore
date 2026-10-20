@@ -201,3 +201,20 @@ docker-context/bin/*
 !docker-context/bin/.gitkeep
 docker-context/tools/*
 !docker-context/tools/.gitkeep
+
+# 本地录播与剪辑产物
+/快手/
+/抖音/
+/Bilibili/
+*.flv
+*.mp4
+*.ass
+*.srt
+*.wav
+**/clips/
+
+# Python 缓存与离线 AI 模型权重
+__pycache__/
+*.py[cod]
+tools/analyzer/models/
+*.bin

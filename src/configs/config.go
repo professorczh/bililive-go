@@ -1940,6 +1940,13 @@ func NormalizeLiveRoomUrl(urlStr string) string {
 			return "https://live.douyin.com/" + rid
 		}
 	}
+	// 抖音网页关注页/直播间入口（如 www.douyin.com/follow/live/759939177519 或 www.douyin.com/live/759939177519）
+	if u.Host == "www.douyin.com" || u.Host == "douyin.com" {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 && parts[len(parts)-2] == "live" && isAllDigits(parts[len(parts)-1]) {
+			return "https://live.douyin.com/" + parts[len(parts)-1]
+		}
+	}
 	return urlStr
 }
 
@@ -1962,6 +1969,7 @@ const PlatformKeyDouyin = "douyin"
 
 // GetPlatformKeyFromUrl 从URL中提取平台键，用于配置查找
 func GetPlatformKeyFromUrl(urlStr string) string {
+	urlStr = NormalizeLiveRoomUrl(urlStr)
 	u, err := url.Parse(urlStr)
 	if err != nil {
 		return ""

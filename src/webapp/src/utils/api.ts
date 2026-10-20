@@ -158,6 +158,15 @@ class API {
         return utils.requestPut(`${BASE_URL}/batch/file/rename`, { paths, find, replace });
     }
 
+    /**
+     * 触发本地 AI 智能切片与分段归纳
+     * @param path 视频相对路径
+     * @param clip 是否自动导出高光短视频切片
+     */
+    analyzeFile(path: string, clip: boolean = true) {
+        return utils.requestPost(`${BASE_URL}/batch/file/analyze`, { path, clip });
+    }
+
     batchDeleteFiles(paths: string[]) {
         return utils.requestPost(`${BASE_URL}/batch/file/delete`, { paths });
     }
@@ -199,6 +208,14 @@ class API {
      */
     saveCookie(json: any) {
         return utils.requestPut(`${BASE_URL}/cookies`, json);
+    }
+
+    /**
+     * 校验平台 Cookie 是否有效
+     * @param json {"Host":"","Cookie":""}
+     */
+    verifyCookie(json: { Host: string; Cookie: string }) {
+        return utils.requestPost(`${BASE_URL}/cookies/verify`, json);
     }
 
     /**

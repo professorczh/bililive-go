@@ -796,7 +796,7 @@ func (r *recorder) tryRecord(ctx context.Context) {
 		bash := ""
 		args := []string{}
 		switch runtime.GOOS {
-		case "linux":
+		case "linux", "darwin":
 			bash = "sh"
 			args = []string{"-c"}
 		case "windows":

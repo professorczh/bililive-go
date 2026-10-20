@@ -90,3 +90,13 @@ message User {
   string nickname = 2;
   string avatar = 3;
 }
+
+// LikeMessage — 点赞消息
+message LikeMessage {
+  Common common = 1;
+  int64 count = 2;
+  int64 total = 3;
+  int64 color = 4;
+  User user = 5;
+  string icon = 6;
+}
