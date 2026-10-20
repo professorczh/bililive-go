@@ -39,18 +39,39 @@ type Live struct {
 }
 
 func (l *Live) getRoomInfo() ([]byte, error) {
-	paths := strings.Split(l.Url.Path, "/")
-	if len(paths) < 5 {
+	roomid := ""
+	reg := regexp.MustCompile(`(1022|1042152):[0-9]+`)
+	if match := reg.FindString(l.Url.String()); match != "" {
+		roomid = match
+	} else {
+		paths := strings.Split(strings.Trim(l.Url.Path, "/"), "/")
+		if len(paths) > 0 {
+			roomid = paths[len(paths)-1]
+		}
+	}
+	if roomid == "" {
 		return nil, live.ErrRoomUrlIncorrect
 	}
-	roomid := paths[5]
 	l.roomID = roomid
 
-	resp, err := l.RequestSession.Get(liveurl+roomid,
+	opts := []requests.RequestOption{
 		live.CommonUserAgent,
 		requests.Headers(map[string]any{
-			"Referer": l.Url,
-		}))
+			"Referer": l.Url.String(),
+		}),
+	}
+	if l.Options.Cookies != nil {
+		cookies := l.Options.Cookies.Cookies(l.Url)
+		if len(cookies) > 0 {
+			cookieKVs := make(map[string]string, len(cookies))
+			for _, item := range cookies {
+				cookieKVs[item.Name] = item.Value
+			}
+			opts = append(opts, requests.Cookies(cookieKVs))
+		}
+	}
+
+	resp, err := l.RequestSession.Get(liveurl+roomid, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +91,20 @@ func (l *Live) GetInfo() (info *live.Info, err error) {
 	if err != nil {
 		return nil, live.ErrRoomNotExist
 	}
+	status := gjson.GetBytes(body, "data.status").Int()
+	flvUrl := gjson.GetBytes(body, "data.live_origin_flv_url").String()
+	hlsUrl := gjson.GetBytes(body, "data.live_origin_hls_url").String()
+	replayUrl := gjson.GetBytes(body, "data.replay_origin_url").String()
+
+	// status == 1 代表正在直播中；status == 3 代表已转为回放
+	// 当存在可用的实时流或回放流地址时，判定为处于可录制状态
+	isLive := status == 1 || (status == 3 && (replayUrl != "" || flvUrl != "" || hlsUrl != ""))
+
 	info = &live.Info{
 		Live:         l,
 		HostName:     gjson.GetBytes(body, "data.user.screenName").String(),
 		RoomName:     gjson.GetBytes(body, "data.title").String(),
-		Status:       gjson.GetBytes(body, "data.status").String() == "1",
+		Status:       isLive,
 		CustomLiveId: "weibolive/" + l.roomID,
 	}
 	return info, nil
@@ -87,9 +117,19 @@ func (l *Live) GetStreamUrls() (us []*url.URL, err error) {
 	}
 
 	streamurl := gjson.GetBytes(body, "data.live_origin_flv_url").String()
+	if streamurl == "" {
+		streamurl = gjson.GetBytes(body, "data.live_origin_hls_url").String()
+	}
+	if streamurl == "" {
+		streamurl = gjson.GetBytes(body, "data.replay_origin_url").String()
+	}
+	if streamurl == "" {
+		return nil, live.ErrLiveOffline
+	}
+
 	queryParams := l.Url.Query()
 	quality := queryParams.Get("q")
-	if quality != "" {
+	if quality != "" && strings.Contains(streamurl, ".flv") {
 		targetQuality := "_wb" + quality + "avc.flv"
 		reg, err := regexp.Compile(`_wb[\d]+avc\.flv`)
 		if err == nil && reg.MatchString(streamurl) {

@@ -369,6 +369,7 @@ on_record_finished:
 * **各平台在线活体探测机制**：
   * **快手**：检验关键安全凭据 `kuaishou.live.web_st`，实时请求快手服务端解析 `ownerInfo`，成功后提取当前登录用户名与 UID（例如：`广源大厦陈先生 (UID: 385284051)`）。
   * **抖音**：检验会话令牌 `sessionid`，通过向 `/aweme/v1/web/notice/count/` 真实发包判定会话是否存活（`status_code == 0` 为有效，`8` 为未登录/失效）。
+  * **微博直播**：检验双核心安全凭据 `SUB` 与 `SUBP`（新浪通行证统一 SSO 会话），向微博服务端请求验证并解析 `$CONFIG` 上下文中的用户昵称与 UID（例如：`Professor_Chan (UID: 1868641703)`）。
   * **哔哩哔哩**：请求 B 站 `/x/web-interface/nav` 接口读取登录态及 `uname`、`mid`。
   * **斗鱼**：校验 `acf_auth` / `acf_uid` 令牌有效性。
 
@@ -376,21 +377,44 @@ on_record_finished:
 
 * **Cookie 列表操作栏测试盾牌**：
   在 WebUI 的 **【Cookie管理】** 列表中，蓝色编辑按钮（✏️）右侧新增绿色圆形测试按钮（`<SafetyCertificateOutlined />`）。点击后呈现转圈防抖状态，并弹出 Ant Design 全局通知反馈测试详情（成功显示账号昵称与 UID，失败提示明确原因）。
+* **已配置平台兜底展示**：
+  增强了 WebUI Cookie 列表拉取逻辑，只要在 `config.yml` 中配置过的平台（如快手、抖音、微博等），即使当前未添加该平台的直播间，也会持久显示在 Cookie 管理表格中，便于随时维护与一键验证。
 * **编辑弹窗内「测试当前输入」**：
   在 Cookie 修改弹窗中，新增“测试当前输入”按钮。从浏览器复制新 Cookie 粘贴后，无需先保存即可直接点击测试，确认校验通过后再保存入盘。
 
 #### 3. 关于 Cookie 容错与“核心会话令牌”的说明
 
-Cookie 在 HTTP 协议中是一组分号分隔的键值对。几千字节的内容中，绝大部分（如 `did`, `odin_tt`, `theme`, `volume_info` 等）只是设备指纹或前端界面状态，**真正决定登录有效性的只有核心令牌**：
+Cookie 在 HTTP 协议中是一组分号分隔的键值对。几千字节的内容中，绝大部分（如 `did`, `odin_tt`, `theme`, `volume_info`, `_s_tentry` 等）只是设备指纹或前端界面状态，**真正决定登录有效性的只有核心令牌**：
 * 抖音的核心只有 **`sessionid`**；
 * 快手的核心只有 **`kuaishou.live.web_st`**；
+* 微博的核心是 **`SUB`**（身份凭证）与 **`SUBP`**（单点登录跨域校验，二者必须成对存在）；
 * B 站的核心只有 **`SESSDATA`**。
 
 只要核心令牌正确无损，修改或冗余其他次要键值通常不会使服务端报错；而只要核心令牌改动一个字符或过期，系统即可秒级阻断并提示错误。
 
 ---
 
-### 四、本地构建与更新工作流
+### 四、微博直播与付费回放录制适配
+
+#### 1. 核心改进点 (`src/live/weibolive/weibolive.go`)
+1. **多格式房间 ID 自动正则提取**：
+   支持形如 `https://weibo.com/l/wblive/p/show/1022:2321325354984119599338`、`1042152:...` 及常见短链，精准提取冒号复合 ID。
+2. **Cookie 请求透传**：
+   在向 `https://weibo.com/l/!/2/wblive/room/show_pc_live.json` 请求直播间状态时，注入全局配置的微博 Cookie。
+3. **实时直播与付费回放双模支持**：
+   - 官方原生逻辑仅在 `data.status == 1` 时判定为开播，一旦直播结束（`status == 3`）即判定为下线。
+   - 改进后：兼容 `status == 1`（实时直播）与 `status == 3`（已结束转为回放），若检测到存在可录制流地址，则标记为可录制状态。
+4. **多级码率流地址级联降级**：
+   流地址提取顺序：`live_origin_flv_url` -> `live_origin_hls_url` -> `replay_origin_url`，确保回放流（HLS M3U8）能被流畅录制。
+
+#### 2. 付费直播鉴权机制分析
+- 微博 Web 端针对付费直播的“60秒试看拦截”，实质是在前端通过 JavaScript 计时器展示遮罩弹窗（`pay_dialog_info`）；
+- 底层的回放/直播 CDN 流地址（如 `http://live.video.weibocdn.com/..._index.m3u8`）由阿里云/新浪 CDN 托管，分片未进行 DRM 加密。
+- 在 bililive-go 中注入购买过权限的用户 Cookie（含 `SUB` + `SUBP`）后，微博服务端 API 返回 `"pay_live_status": 1` 并直接下发完整 1080P 60fps 高清原画源地址，录制器可不受任何阻碍地完整下载整场视频。
+
+---
+
+### 五、本地构建与更新工作流
 
 ```bash
 # 1. 编译前端（每次修改 src/webapp 后执行）

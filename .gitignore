@@ -206,8 +206,10 @@ docker-context/tools/*
 /快手/
 /抖音/
 /Bilibili/
+/微博直播/
 *.flv
 *.mp4
+*.ts
 *.ass
 *.srt
 *.wav

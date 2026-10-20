@@ -3174,13 +3174,28 @@ func getLiveHostCookie(writer http.ResponseWriter, r *http.Request) {
 	// 斗鱼扫码入口兜底：列表行只由"运行中的房间 host"推导，用户删掉全部斗鱼房间后
 	// 既看不到自动续期失败提醒、也无法重新扫码。只要后端仍持有斗鱼凭证就固定补一行。
 	if cfg := configs.GetCurrentConfig(); cfg != nil {
-		if _, ok := hostCookieMap[dy.CookieHost]; !ok && (cfg.DouyuAuth.LTP0 != "" || cfg.Cookies[dy.CookieHost] != "") {
-			hostCookieMap[dy.CookieHost] = &live.InfoCookie{
-				Platform_cn_name: "斗鱼",
-				Host:             dy.CookieHost,
-				Cookie:           cfg.Cookies[dy.CookieHost],
+		for h, c := range cfg.Cookies {
+			if _, ok := hostCookieMap[h]; !ok && (c != "" || h == dy.CookieHost) {
+				cn := h
+				switch {
+				case strings.Contains(h, "weibo"):
+					cn = "微博直播"
+				case strings.Contains(h, "douyin"):
+					cn = "抖音"
+				case strings.Contains(h, "kuaishou"):
+					cn = "快手"
+				case strings.Contains(h, "bilibili"):
+					cn = "哔哩哔哩"
+				case strings.Contains(h, "douyu"):
+					cn = "斗鱼"
+				}
+				hostCookieMap[h] = &live.InfoCookie{
+					Platform_cn_name: cn,
+					Host:             h,
+					Cookie:           c,
+				}
+				keys = append(keys, h)
 			}
-			keys = append(keys, dy.CookieHost)
 		}
 	}
 	sort.Strings(keys)
@@ -4198,6 +4213,52 @@ func verifyPlatformCookie(writer http.ResponseWriter, r *http.Request) {
 			Valid:    false,
 			Platform: "斗鱼",
 			Message:  "斗鱼 Cookie 缺少 acf_auth / acf_uid 凭据，建议使用右侧重新扫码",
+		})
+		return
+
+	case strings.Contains(host, "weibo"):
+		if !strings.Contains(cookie, "SUB=") || !strings.Contains(cookie, "SUBP=") {
+			writeJSON(writer, verifyCookieResp{
+				Valid:    false,
+				Platform: "微博",
+				Message:  "微博 Cookie 格式不完整：缺少关键鉴权凭据 SUB 或 SUBP（两者必须成对存在）",
+			})
+			return
+		}
+
+		resp, err := requests.Get("https://weibo.com/",
+			requests.Header("Cookie", cookie),
+			live.CommonUserAgent,
+		)
+		if err != nil {
+			writeJSON(writer, verifyCookieResp{Valid: false, Platform: "微博", Message: "请求微博服务器失败: " + err.Error()})
+			return
+		}
+		body, _ := resp.Text()
+		reg := regexp.MustCompile(`\$CONFIG\s*=\s*(\{.*?\});`)
+		matches := reg.FindStringSubmatch(body)
+		if len(matches) >= 2 {
+			res := gjson.Parse(matches[1])
+			uid := res.Get("uid").String()
+			name := res.Get("user.screen_name").String()
+			if name == "" {
+				name = res.Get("nick").String()
+			}
+			if uid != "" && uid != "0" {
+				writeJSON(writer, verifyCookieResp{
+					Valid:    true,
+					Platform: "微博",
+					Username: name,
+					UID:      uid,
+					Message:  fmt.Sprintf("微博 Cookie 验证通过！当前用户: %s (UID: %s)", name, uid),
+				})
+				return
+			}
+		}
+		writeJSON(writer, verifyCookieResp{
+			Valid:    false,
+			Platform: "微博",
+			Message:  "微博 Cookie 验证失败：未检测到有效登录身份，可能已过期或被通行证网关拦截",
 		})
 		return
 
