@@ -291,7 +291,15 @@ grep -o 'window\.__INITIAL_STATE__ *= *.*' /tmp/page.html | head -c 2000
 
 ## 核心能力升级与扩展功能说明（2026-10）
 
-本次本地大版本升级为 bililive-go 注入了三大核心系统：**离线 AI 智能切片分析流水线**、**多平台弹幕录制引擎** 与 **Cookie 在线安全测试校验系统**。
+本次本地大版本升级为 bililive-go 注入了**六大核心系统与自愈机制**：
+1. **离线 AI 智能切片与全维直播分析流水线** (`tools/analyzer/`)
+2. **多平台弹幕录制引擎与全网支持矩阵** (B站/抖音/斗鱼/快手/微博)
+3. **WebUI Cookie 在线安全测试与校验系统** (`POST /api/cookies/verify`)
+4. **微博直播与付费回放录制适配** (`src/live/weibolive/`)
+5. **本地全量构建与运行发布工作流**
+6. **故障排查与精准靶向重置系统** (`tools/doctor.py`)
+
+---
 
 ### 一、离线 AI 智能切片与全维直播分析系统 (`tools/analyzer/`)
 
@@ -346,16 +354,15 @@ on_record_finished:
 
 ---
 
-### 二、多平台弹幕录制引擎（抖音 & 快手）
+### 二、多平台音画录制与弹幕引擎支持矩阵
 
-1. **抖音弹幕录制 (`src/recorders/danmaku/douyin/`)**：
-   - 升级完整的 Protobuf 解码协议与数据结构（`dy.proto`, `dy.pb.go`）。
-   - 实现全双工 WebSocket 长链接弹幕监听，包含每 10 秒的心跳保活包与断线重连机制。
-   - 随同视频录制全量录制弹幕并实时渲染生成时序对齐的标准 `.ass` 字幕。
-
-2. **快手直播源与弹幕探针**：
-   - 修复官方 Web 端 `liveroom.playList` API 结构变更导致的直播流解析失败问题（PR #1214）。
-   - 补充专用快手 Web 弹幕客户端脚本 `tools/analyzer/ks_danmaku_client.py`，支持独立探测并抓取直播间实时消息流。
+| 直播平台 | 视频录制能力 | 弹幕录制能力 (`.ass`) | 鉴权与协议特性分析 |
+| :--- | :---: | :---: | :--- |
+| **哔哩哔哩** | ✅ HEVC/AVC 原画 | ✅ 实时弹幕、舰长、SC、高能 | 核心凭证为 `SESSDATA`；CDN 严格校验 `Referer: https://live.bilibili.com` 防盗链。 |
+| **抖音** | ✅ H.264 原画 FLV | ✅ 实时弹幕、全量礼物同步 | 核心令牌为 `sessionid`；升级 Protobuf 解码协议与全双工 WebSocket 长连接；通过本地 `18110` 微服务完成反爬签名。 |
+| **斗鱼** | ✅ 原画 FLV | ✅ 实时弹幕、酬勤、礼物 | 核心凭据为 `acf_auth` / `acf_uid`；支持扫码自动续期与持久化。 |
+| **快手** | ✅ H.264/HEVC 原画 | ❌ 原生未注册弹幕器 | 核心凭据为 `kuaishou.live.web_st`；视频拉流已修复 `liveroom.playList` API 结构变更（PR #1214）；弹幕长连接需通过 GraphQL `webSocketInfo` 换取动态 Token，在无头环境中存在强风控拦截。 |
+| **微博直播** | ✅ FLV 实时 + TS 回放 | ❌ 官方无弹幕协议 | 双核心凭证 `SUB` + `SUBP`；支持复合 ID 解析与回放降级流获取；付费直播试看为前端 JS 遮罩，持有有效 Cookie 可免阻碍拉取 1080P 60fps 全场流。 |
 
 ---
 
@@ -434,6 +441,20 @@ go run build.go release --platform darwin --arch arm64
 当 Web 界面直播间名称右侧出现**红色感叹号（`<ExclamationCircleOutlined />`）**报警时，请遵循以下精准判定与重置机制，切勿盲目使用 `killall node` 破坏本地其他服务。
 
 #### 1. 报警类型精准判定法则
+
+```mermaid
+graph TD
+    Icon["🔴 发现红色感叹号报警"] --> ReadError["🔍 鼠标悬停查看 Tooltip 报错详情"]
+
+    ReadError --> Case1{"包含 127.0.0.1:18110\ncontext deadline exceeded ?"}
+    Case1 -->|"是"| Action1["🛠️ 本地签名微服务死锁/挂起\n➡️ 执行 python3 tools/doctor.py --fix"]
+
+    ReadError --> Case2{"包含 status_code==8\n或 403 Forbidden ?"}
+    Case2 -->|"是"| Action2["🔑 账号 Cookie 过期或风控\n➡️ 在 WebUI Cookie 列表粘贴新凭证并测试保存"]
+
+    ReadError --> Case3{"包含 房间不存在\n或 room not found ?"}
+    Case3 -->|"是"| Action3["🌐 主播关停或链接填错\n➡️ 检查修正直播间链接"]
+```
 
 | 错误特征 | 典型报错信息 | 故障根因 | 正确处置方式 |
 | :--- | :--- | :--- | :--- |
