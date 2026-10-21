@@ -427,3 +427,41 @@ go run build.go release --platform darwin --arch arm64
 ./bin/bililive-darwin-arm64 --no-launcher
 ```
 
+---
+
+### 六、故障排查与精准靶向重置（Doctor & Auto-Healer）
+
+当 Web 界面直播间名称右侧出现**红色感叹号（`<ExclamationCircleOutlined />`）**报警时，请遵循以下精准判定与重置机制，切勿盲目使用 `killall node` 破坏本地其他服务。
+
+#### 1. 报警类型精准判定法则
+
+| 错误特征 | 典型报错信息 | 故障根因 | 正确处置方式 |
+| :--- | :--- | :--- | :--- |
+| **本地服务死锁** | `127.0.0.1:18110 ... context deadline exceeded` 或 `connection refused` | 本地 `bililive-tools`（18110 端口）挂起或残留了 100% CPU 孤儿僵尸进程 | **执行靶向自愈重置**（释放 18110 端口并重启服务） |
+| **平台凭证失效** | `status_code == 8` / `kuaishou.live.web_st expired` / `403 Forbidden` | 对应平台的账号 Cookie 过期或被风控 | **仅更新对应 Cookie**（在 WebUI 点击“测试”验证通过后保存），无需重启服务 |
+| **房间地址无效** | `房间不存在` / `room not found` / `url incorrect` | 房间已注销或 URL 地址格式错误 | 检查修正直播间链接 |
+
+#### 2. 一键体检与靶向自愈命令
+
+我们内置了专用的体检与自愈脚本 `tools/doctor.py`：
+
+```bash
+# 1. 精准只读体检（不破坏任何进程，3秒内输出诊断结果）
+python3 tools/doctor.py
+
+# 2. 一键靶向自愈（仅清理 18110 僵死进程并平滑重启，绝不误伤系统其他应用）
+python3 tools/doctor.py --fix
+```
+
+#### 3. 手动精准重置命令（两步法）
+
+如需手动操作，严禁盲目杀进程，只需执行以下两条精准命令：
+```bash
+# 第 1 步：仅释放 18110 端口被霸占的 PID
+kill -9 $(lsof -ti :18110)
+
+# 第 2 步：平滑重启 bililive-go 主程序
+pkill -f "bililive-darwin-arm64"
+./bin/bililive-darwin-arm64 --no-launcher
+```
+
