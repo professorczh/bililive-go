@@ -75,7 +75,7 @@ make dev
 ./bin/bililive-dev -i "https://live.bilibili.com/22603245" -t 30
 
 # 启用 Web 界面（RPC 模式）
-./bin/bililive-dev --enable-rpc --rpc-bind :8080
+./bin/bililive-dev --enable-rpc --rpc-bind :8090
 ```
 
 ### 使用配置文件运行
@@ -118,7 +118,7 @@ make clean
 项目根目录下的 `config.yml` 是主配置文件。关键配置项：
 
 - `rpc.enable`: 是否启用 Web 界面（默认 true）
-- `rpc.bind`: Web 界面绑定地址（默认 :8080）
+- `rpc.bind`: Web 界面绑定地址（默认改为 :8090，避开 8080 端口占用）
 - `out_put_path`: 录制文件输出目录
 - `live_rooms`: 要监听的直播间列表
 - `ffmpeg_path`: FFmpeg 路径（留空自动检测）
@@ -130,7 +130,7 @@ make clean
 启动后，如果启用了 RPC，访问：
 
 ```
-http://localhost:8080
+http://localhost:8090
 ```
 
 ## 常见问题
@@ -191,7 +191,7 @@ cp config.yml bin/
 ./bin/bililive-darwin-arm64 --no-launcher
 ```
 
-Web 界面：http://localhost:8080
+Web 界面：http://localhost:8090
 
 停止服务：
 

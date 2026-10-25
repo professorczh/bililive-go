@@ -12,7 +12,24 @@ import json
 import urllib.request
 import urllib.error
 
-BGO_PORT = 8080
+def get_bgo_port():
+    """从 bin/config.yml 或 config.yml 中读取 rpc.bind 端口"""
+    for cfg in ["bin/config.yml", "config.yml"]:
+        if os.path.exists(cfg):
+            try:
+                with open(cfg, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip().startswith("bind:"):
+                            val = line.split(":", 1)[1].strip().strip('"').strip("'")
+                            if ":" in val:
+                                return int(val.rsplit(":", 1)[1])
+                            elif val.isdigit():
+                                return int(val)
+            except Exception:
+                pass
+    return 8090
+
+BGO_PORT = get_bgo_port()
 BTOOLS_PORT = 18110
 BTOOLS_AUTH = "Basic YTph"
 
@@ -101,10 +118,10 @@ def run_doctor(auto_fix=False):
     print("🩺 bililive-go 核心服务精准体检与诊断")
     print("==================================================")
 
-    # 1. 检测主程序 (8080)
+    # 1. 检测主程序
     bgo_ok, bgo_errors, total_rooms = check_bgo_lives()
     if bgo_ok:
-        log_ok(f"bililive-go 主服务正常运行 (8080 端口，监控中房间: {total_rooms} 个)")
+        log_ok(f"bililive-go 主服务正常运行 ({BGO_PORT} 端口，监控中房间: {total_rooms} 个)")
         if bgo_errors:
             log_warn(f"当前有 {len(bgo_errors)} 个房间存在异常感叹号报错：")
             for err in bgo_errors:
@@ -112,7 +129,7 @@ def run_doctor(auto_fix=False):
         else:
             log_ok("当前所有监控房间均无异常报错（无红色感叹号）")
     else:
-        log_error(f"bililive-go 主服务 (8080) 无法连接: {bgo_errors}")
+        log_error(f"bililive-go 主服务 ({BGO_PORT}) 无法连接: {bgo_errors}")
 
     print("\n--------------------------------------------------")
     # 2. 检测抖音辅助签名服务 (18110)

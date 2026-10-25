@@ -2,7 +2,7 @@
 # 需要修改注释时，请在 src/configs/config_comments.go 文件内修改。
 rpc:
   enable: true
-  bind: :8080
+  bind: :8090
   sse_list_threshold: 50
 debug: false
 interval: 20
